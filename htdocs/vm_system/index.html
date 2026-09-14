@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟机管理系统</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            width: 350px;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .tab-container {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            background: #f1f1f1;
+            border: none;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #5a67d8;
+        }
+        .error {
+            color: #e74c3c;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>虚拟机管理系统</h2>
+        
+        <div class="tab-container">
+            <button class="tab active" onclick="showTab('login')">登录</button>
+            <button class="tab" onclick="showTab('register')">注册</button>
+        </div>
+        
+        <!-- 登录表单 -->
+        <div id="login-form">
+            <form id="loginForm" onsubmit="return loginUser(event)">
+                <div class="form-group">
+                    <input type="text" id="loginUsername" placeholder="用户名" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="loginPassword" placeholder="密码" required>
+                </div>
+                <button type="submit">登录</button>
+                <div id="loginError" class="error"></div>
+            </form>
+        </div>
+        
+        <!-- 注册表单 -->
+        <div id="register-form" class="hidden">
+            <form id="registerForm" onsubmit="return registerUser(event)">
+                <div class="form-group">
+                    <input type="text" id="regUsername" placeholder="用户名" required>
+                </div>
+                <div class="form-group">
+                    <input type="email" id="regEmail" placeholder="邮箱" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="regPassword" placeholder="密码" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="regConfirmPassword" placeholder="确认密码" required>
+                </div>
+                <button type="submit">注册</button>
+                <div id="registerError" class="error"></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // 切换标签页
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // 显示对应表单
+            document.getElementById('login-form').classList.toggle('hidden', tabName !== 'login');
+            document.getElementById('register-form').classList.toggle('hidden', tabName !== 'register');
+        }
+        
+        async function loginUser(event) {
+            event.preventDefault();
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            const response = await fetch('/cgi-bin/login.py', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'login', username, password })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // 存储用户信息
+                sessionStorage.setItem('user_id', result.user_id);
+                sessionStorage.setItem('username', result.username);
+                // 跳转到管理页面
+                window.location.href = 'dashboard.html';
+            } else {
+                document.getElementById('loginError').textContent = result.message;
+            }
+        }
+        
+        async function registerUser(event) {
+            event.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            const confirmPassword = document.getElementById('regConfirmPassword').value;
+            
+            if (password !== confirmPassword) {
+                document.getElementById('registerError').textContent = '两次输入的密码不一致';
+                return false;
+            }
+            
+            const response = await fetch('/cgi-bin/login.py', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'register', 
+                    username, 
+                    email, 
+                    password 
+                })
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                alert('注册成功！请登录');
+                showTab('login');
+            } else {
+                document.getElementById('registerError').textContent = result.message;
+            }
+        }
+    </script>
+</body>
+</html>

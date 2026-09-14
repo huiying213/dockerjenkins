@@ -1,0 +1,228 @@
+#!D:\python3.12\python.exe
+#!python
+# -*- coding: utf-8 -*-
+import sys
+import os
+import json
+import hashlib
+import mysql.connector
+from mysql.connector import Error
+from datetime import datetime, date
+
+# 设置标准输出编码为UTF-8
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
+
+# 首先输出Content-Type
+sys.stdout.write("Content-Type: application/json; charset=utf-8\r\n")
+sys.stdout.write("\r\n")  # 空行分隔头部和内容
+
+# 数据库配置
+DB_CONFIG = {
+    'host': 'localhost',
+    'database': 'vm_management',
+    'user': 'root',
+    'password': '123456',  # 修改为你的密码
+    'charset': 'utf8mb4'
+}
+
+class DateTimeEncoder(json.JSONEncoder):
+    """自定义JSON编码器，处理datetime对象"""
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return super().default(obj)
+
+def hash_password(password):
+    """使用SHA-256加密密码"""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def get_db_connection():
+    """获取数据库连接"""
+    try:
+        return mysql.connector.connect(**DB_CONFIG)
+    except Error as e:
+        return None
+
+def serialize_user_data(user):
+    """序列化用户数据，处理datetime对象"""
+    if not user:
+        return user
+    
+    result = {}
+    for key, value in user.items():
+        if isinstance(value, (datetime, date)):
+            result[key] = value.isoformat()
+        elif isinstance(value, bytes):
+            try:
+                result[key] = value.decode('utf-8')
+            except:
+                result[key] = str(value)
+        else:
+            result[key] = value
+    return result
+
+def register_user(username, email, password):
+    """注册新用户"""
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败"
+    
+    try:
+        cursor = conn.cursor()
+        hashed_pwd = hash_password(password)
+        
+        # 检查用户名是否已存在
+        cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if cursor.fetchone():
+            return False, "用户名已存在"
+        
+        # 检查邮箱是否已存在
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+        if cursor.fetchone():
+            return False, "邮箱已存在"
+        
+        # 插入新用户
+        cursor.execute(
+            "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
+            (username, email, hashed_pwd)
+        )
+        conn.commit()
+        return True, "注册成功"
+    except Error as e:
+        return False, f"数据库错误: {str(e)}"
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def login_user(username, password):
+    """用户登录验证"""
+    conn = get_db_connection()
+    if not conn:
+        return False, "数据库连接失败", None
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        hashed_pwd = hash_password(password)
+        
+        cursor.execute(
+            "SELECT id, username, created_at FROM users WHERE username = %s AND password = %s",
+            (username, hashed_pwd)
+        )
+        user = cursor.fetchone()
+        
+        if user:
+            # 序列化用户数据
+            serialized_user = serialize_user_data(user)
+            return True, "登录成功", serialized_user
+        else:
+            return False, "用户名或密码错误", None
+    except Error as e:
+        return False, f"数据库错误: {str(e)}", None
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def format_datetime_for_json(obj):
+    """格式化对象中的datetime为字符串"""
+    if isinstance(obj, dict):
+        return {k: format_datetime_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [format_datetime_for_json(item) for item in obj]
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, bytes):
+        try:
+            return obj.decode('utf-8')
+        except:
+            return str(obj)
+    else:
+        return obj
+
+def main():
+    """主处理函数"""
+    try:
+        # 获取请求方法
+        request_method = os.environ.get('REQUEST_METHOD', 'GET')
+        
+        if request_method == 'POST':
+            # 读取POST数据
+            content_length = int(os.environ.get('CONTENT_LENGTH', 0))
+            
+            if content_length > 0:
+                # 读取原始数据
+                post_data = sys.stdin.read(content_length)
+                
+                try:
+                    # 尝试解析JSON
+                    data = json.loads(post_data)
+                except json.JSONDecodeError:
+                    # 如果不是JSON，尝试解析表单数据
+                    from urllib.parse import parse_qs
+                    data = parse_qs(post_data)
+                    # 转换为简单字典
+                    data = {k: v[0] if v else '' for k, v in data.items()}
+            else:
+                data = {}
+            
+            action = data.get('action')
+            response = {}
+            
+            if action == 'register':
+                username = data.get('username', '').strip()
+                email = data.get('email', '').strip()
+                password = data.get('password', '').strip()
+                
+                success, message = register_user(username, email, password)
+                response = {'success': success, 'message': message}
+                
+            elif action == 'login':
+                username = data.get('username', '').strip()
+                password = data.get('password', '').strip()
+                
+                success, message, user = login_user(username, password)
+                if success:
+                    response = {
+                        'success': True,
+                        'message': message,
+                        'user_id': user['id'],
+                        'username': user['username']
+                    }
+                else:
+                    response = {'success': False, 'message': message}
+            else:
+                response = {'success': False, 'message': '无效的操作'}
+            
+            # 格式化响应数据
+            formatted_response = format_datetime_for_json(response)
+            
+            # 输出JSON响应
+            json_response = json.dumps(formatted_response, ensure_ascii=False, cls=DateTimeEncoder)
+            sys.stdout.write(json_response)
+            
+        else:
+            # GET请求返回简单信息
+            response = {
+                'success': True,
+                'message': 'Login API is running',
+                'method': request_method
+            }
+            json_response = json.dumps(response, ensure_ascii=False)
+            sys.stdout.write(json_response)
+            
+    except Exception as e:
+        # 错误处理
+        import traceback
+        error_response = {
+            'success': False,
+            'message': f'服务器错误: {str(e)}',
+            'error_type': type(e).__name__
+        }
+        json_response = json.dumps(error_response, ensure_ascii=False)
+        sys.stdout.write(json_response)
+
+if __name__ == '__main__':
+    main()
