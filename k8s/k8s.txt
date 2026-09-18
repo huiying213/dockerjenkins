@@ -1,0 +1,580 @@
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=http://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=0
+repo_gpgcheck=0
+gpgkey=http://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg
+        http://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+EOF
+
+yum clean all && yum makecache
+
+#查看所有的可用版本
+yum list  kubeadm  kubelet kubectl --showduplicates | sort -r
+#这里安装1.25.0
+yum install -y kubeadm-1.25.0  kubelet-1.25.0 kubectl-1.25.0
+#查看kubadm版本
+kubeadm version
+#为了实现docker使用的cgroupdriver与kubelet使用的cgroup的一致性，建议修改如下文件内容
+#cat <<EOF > /etc/sysconfig/kubelet
+#KUBELET_EXTRA_ARGS="--cgroup-driver=systemd"
+#EOF
+#设置kubelet为开机自启动即可，由于没有生成配置文件，集群初始化后自动启动
+systemctl enable --now kubelet
+#查看可用状态
+systemctl is-active kubelet #显示active ，如果显示inactive可以重启后再看
+
+#192.168.52.131(master) 执行
+#需要指定k8s版本
+kubeadm init --image-repository registry.aliyuncs.com/google_containers --kubernetes-version=v1.25.0 --pod-network-cidr=10.244.0.0/16 --cri-socket /var/run/cri-dockerd.sock
+
+
+
+Your Kubernetes control-plane has initialized successfully!
+
+To start using your cluster, you need to run the following as a regular user:
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+Alternatively, if you are the root user, you can run:
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+Then you can join any number of worker nodes by running the following on each as root:
+
+kubeadm join 192.168.52.131:6443 --token kai6zh.gb8d4vjove0vjznn \
+     --discovery-token-ca-cert-hash sha256:d2c8c9f6ad64d04824a7a8afceac081b4518451437c25cd5633dacab3068c489
+
+##192.168.52.131(master) 执行
+
+#普通用户需要执行以下命令
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+#root 用户执行
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+
+#为防止kubeadm join报以下错误
+#[preflight] Some fatal errors occurred:
+#        [ERROR CRI]: container runtime is not running: output: time="2023-01-04T12:51:02+08:00" level=fatal msg="unable to #determine runtime API version: rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+#, error: exit status 1 
+mv /etc/containerd/config.toml /etc/containerd/config.toml.bak
+systemctl restart containerd
+
+
+#需要加--cri-socket unix:///var/run/cri-dockerd.sock
+kubeadm join 192.168.52.131:6443 --token kai6zh.gb8d4vjove0vjznn \
+        --discovery-token-ca-cert-hash sha256:d2c8c9f6ad64d04824a7a8afceac081b4518451437c25cd5633dacab3068c489 \
+         --cri-socket unix:///var/run/cri-dockerd.sock
+ #为了让node节点也能执行kubectl命令
+echo "export KUBECONFIG=/etc/kubernetes/kubelet.conf" >> /etc/profile
+source /etc/profile
+
+
+
+
+准备阶段
+阿里云： Base 源：https://mirrors.aliyun.com/repo/Centos-7.repo EPEL 源：https://mirrors.aliyun.com/repo/epel-7.repo
+
+腾讯云： Base 源：https://mirrors.cloud.tencent.com/repo/centos7_base.repo EPEL 源：https://mirrors.cloud.tencent.com/repo/epel-7.repo
+
+curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo
+
+yum clean all
+yum makecache
+yum install -y vim
+配置国内 EPEL 源
+
+安装 epel-release：
+
+yum install -y epel-release
+替换为国内 EPEL 源（以阿里云为例）：
+
+curl -o /etc/yum.repos.d/epel.repo https://mirrors.aliyun.com/repo/epel-7.repo
+rm -f /etc/yum.repos.d/epel-testing.repo
+清理并生成缓存：
+
+yum clean all
+yum makecache
+验证 EPEL 源是否可用： 测试安装软件包，例如：
+
+yum install -y htop
+
+
+docker安装
+CentOS （使用 yum 进行安装）
+
+# step 1: 安装必要的一些系统工具
+sudo yum install -y yum-utils
+
+# Step 2: 添加软件源信息
+yum-config-manager --add-repo https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+
+# Step 3: 安装Docker
+sudo yum install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+清华源：yum-config-manager --add-repo https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/centos/docker-ce.repo
+因网络问题，多点几次可安装
+
+# Step 4: 开启Docker服务
+sudo service docker start
+systemctl start docker.service
+
+# 注意：
+# 官方软件源默认启用了最新的软件，您可以通过编辑软件源的方式获取各个版本的软件包。例如官方并没有将测试版本的软件源置为可用，您可以通过以下方式开启。同理可以开启各种测试版本等。
+# vim /etc/yum.repos.d/docker-ce.repo
+#   将[docker-ce-test]下方的enabled=0修改为enabled=1
+#
+# 安装指定版本的Docker-CE:
+# Step 1: 查找Docker-CE的版本:
+# yum list docker-ce.x86_64 --showduplicates | sort -r
+#   Loading mirror speeds from cached hostfile
+#   Loaded plugins: branch, fastestmirror, langpacks
+#   docker-ce.x86_64            17.03.1.ce-1.el7.centos            docker-ce-stable
+#   docker-ce.x86_64            17.03.1.ce-1.el7.centos            @docker-ce-stable
+#   docker-ce.x86_64            17.03.0.ce-1.el7.centos            docker-ce-stable
+#   Available Packages
+# Step2: 安装指定版本的Docker-CE: (VERSION例如上面的17.03.0.ce.1-1.el7.centos)
+# sudo yum -y install docker-ce-[VERSION]
+
+
+
+
+
+kubeadm init --image-repository registry.aliyuncs.com/google_containers --kubernetes-version=v1.25.0 --pod-network-cidr=10.244.0.0/16 --cri-socket /var/run/cri-dockerd.sock
+
+
+
+
+mv /etc/sysconfig/network-scripts/ifcfg-ens34 /etc/sysconfig/network-scripts/ifcfg-ens33
+
+
+TYPE="Ethernet"
+PROXY_METHOD="none"
+BROWSER_ONLY="no"
+BOOTPROTO="dhcp"
+DEFROUTE="yes"
+IPV4_FAILURE_FATAL="no"
+IPV6INIT="yes"
+IPV6_AUTOCONF="yes"
+IPV6_DEFROUTE="yes"
+IPV6_FAILURE_FATAL="no"
+IPV6_ADDR_GEN_MODE="stable-privacy"
+NAME="ens34"
+UUID="af2786cd-635d-405e-b189-6519d8930dde"
+DEVICE="ens34"
+ONBOOT="yes"
+
+
+kubeadm reset
+rm -rf /root/.kube
+rm -rf /etc/cni/net.d
+rm -rf /etc/kubernetes/*
+systemctl restart docker
+systemctl restart kubelet
+
+
+
+
+
+
+
+
+
+1、更改主机名
+hostnamectl set-hostname node1
+
+vim /etc/hosts  
+
+192.168.150.131 master
+192.168.150.132 node1
+192.168.150.133 node2
+
+ ssh-keygen -t rsa
+ ssh-copy-id root@master
+ 
+ 
+ tar -zxvf cri-dockerd-0.3.0.amd64.tgz
+cp cri-dockerd/cri-dockerd /usr/bin/
+chmod +x /usr/bin/cri-dockerd 
+#配置启动文件
+vim  /usr/lib/systemd/system/cri-docker.service
+[Unit]
+Description=CRI Interface for Docker Application Container Engine
+Documentation=https://docs.mirantis.com
+After=network-online.target firewalld.service docker.service
+Wants=network-online.target
+Requires=cri-docker.socket
+
+[Service]
+Type=notify
+
+ExecStart=/usr/bin/cri-dockerd --network-plugin=cni --pod-infra-container-image=registry.aliyuncs.com/google_containers/pause:3.7
+
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+
+StartLimitBurst=3
+
+StartLimitInterval=60s
+
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+TasksMax=infinity
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+# 生成socket 文件
+vim /usr/lib/systemd/system/cri-docker.socket
+[Unit]
+Description=CRI Docker Socket for the API
+PartOf=cri-docker.service
+
+[Socket]
+ListenStream=%t/cri-dockerd.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=docker
+
+[Install]
+WantedBy=sockets.target
+
+EOF
+
+# 启动cri-docker并设置开机自动启动
+systemctl daemon-reload
+systemctl enable cri-docker --now
+#显示 active
+systemctl is-active cri-docker
+
+
+
+kubeadm join 192.168.162.128:6443 --token tbg7oe.gicf2pv6jgeil08o \
+        --discovery-token-ca-cert-hash sha256:76b0732ac0372506f82cd4e6229e759bd03d74f907ecf4d342046c62c4f7ba7e \
+		--cri-socket unix:///var/run/cri-dockerd.sock
+		
+		
+		
+wget https://docs.projectcalico.org/manifests/calico.yaml --no-check-certificate
+CALICO_IPV4POOL_CIDR
+10.244.0.0/16
+
+
+export https_proxy="beacons.gcp.gvt2.com:443"
+
+
+配置docker镜像源
+ vim /etc/docker/daemon.json
+ {   
+    "registry-mirrors": [     
+	 "https://docker.m.daocloud.io",
+	 "https://p51mkba8.mirror.aliyun.com",
+     "https://registry.docker-cn.com",       
+     "https://docker.mirrors.ustc.edu.cn",     
+     "https://hub-mirror.c.163.com",        
+     "https://mirror.baidubce.com",         
+     "https://ccr.ccs.tencentyun.com"  ]  
+ }
+ 
+ systemctl daemon-reload
+ systemctl restart docker
+ 
+ 
+ 
+ default via 192.168.162.2 dev ens34 proto dhcp metric 101
+"https://docker.m.daocloud.io",
+"https://p51mkba8.mirror.aliyun.com",
+
+
+
+# ----------------------
+# PersistentVolume (PV)
+# ----------------------
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: weblogic-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: /data/nfs/weblogic      # NFS 服务端的共享目录
+    server: 192.168.162.128       # NFS 服务节点的 IP 地址
+
+---
+# ----------------------
+# PersistentVolumeClaim (PVC)
+# ----------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: weblogic-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# ----------------------
+# Deployment
+# ----------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weblogic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weblogic
+  template:
+    metadata:
+      labels:
+        app: weblogic
+    spec:
+      containers:
+      - name: weblogic
+        image: weblogic:12.2.1.3
+        ports:
+        - containerPort: 7001
+        env:
+        - name: WLS_DOMAIN_NAME
+          value: base_domain
+        - name: WLS_HOSTNAME
+          value: weblogic
+        volumeMounts:
+        - name: weblogic-home
+          mountPath: /root/oracle/user_projects/domains/base_domain
+      volumes:
+      - name: weblogic-home
+        persistentVolumeClaim:
+          claimName: weblogic-pvc
+
+---
+# ----------------------
+# Service
+# ----------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: weblogic
+spec:
+  selector:
+    app: weblogic
+  ports:
+  - protocol: TCP
+    port: 7001
+    targetPort: 7001
+  type: ClusterIP
+
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: weblogic-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  nfs:
+    path: /data/nfs/weblogic      # NFS 服务端的共享目录
+    server: 192.168.162.128       # NFS 服务节点的 IP 地址
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: weblogic-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weblogic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weblogic
+  template:
+    metadata:
+      labels:
+        app: weblogic
+    spec:
+      containers:
+      - name: weblogic
+        image: weblogic:12.2.1.3
+        ports:
+        - containerPort: 7001
+        env:
+        - name: WLS_DOMAIN_NAME
+          value: base_domain
+        - name: WLS_HOSTNAME
+          value: weblogic
+        volumeMounts:
+        - name: weblogic-home
+          mountPath: /root/oracle/user_projects/domains/base_domain
+      volumes:
+      - name: weblogic-home
+        persistentVolumeClaim:
+          claimName: weblogic-pvc
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: weblogic
+spec:
+  selector:
+    app: weblogic
+  ports:
+  - protocol: TCP
+    port: 7001
+    targetPort: 7001
+  type: ClusterIP
+  
+  
+  docker pull container-registry.oracle.com/middleware/weblogic:12.2.1.3
+  
+  
+  
+  
+
+
+TYPE=Ethernet
+PROXY_METHOD=none
+BROWSER_ONLY=no
+BOOTPROTO=static
+IPADDR=192.168.162.130
+NETMASK=255.255.255.0
+GATEWAY=192.168.162.2
+DNS1=114.114.114.114 
+DNS2=8.8.8.8
+#DEFROUTE=yes
+IPV4_FAILURE_FATAL=no
+IPV6INIT=yes
+IPV6_AUTOCONF=yes
+IPV6_DEFROUTE=yes
+IPV6_FAILURE_FATAL=no
+IPV6_ADDR_GEN_MODE=stable-privacy
+NAME=ens33
+UUID=af2786cd-635d-405e-b189-6519d8930dde
+DEVICE=ens33
+ONBOOT=yes
+
+  
+TYPE="Ethernet"
+PROXY_METHOD="none"
+BROWSER_ONLY="no"
+BOOTPROTO="dhcp"
+DEFROUTE="yes"
+IPV4_FAILURE_FATAL="no"
+IPV6INIT="yes"
+IPV6_AUTOCONF="yes"
+IPV6_DEFROUTE="yes"
+IPV6_FAILURE_FATAL="no"
+IPV6_ADDR_GEN_MODE="stable-privacy"
+NAME="ens33"
+UUID="af2786cd-635d-405e-b189-6519d8930dde"
+DEVICE="ens33"
+ONBOOT="yes"
+
+
+
+
+volumeMounts:
+        - name: weblogic-domain-credentials
+          mountPath: /u01/oracle/user_projects/domains/base_domain/domain.properties
+          subPath: domain.properties
+        env:
+        - name: DOMAIN_HOME
+          value: "/u01/oracle/user_projects/domains/base_domain" 
+        - name: WLS_DOMAIN_NAME
+          value: "base_domain"
+        - name: ADMIN_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: weblogic-domain-credentials
+              key: domain.properties
+      volumes:
+      - name: weblogic-domain-credentials
+        secret:
+          secretName: weblogic-domain-credentials
+		  
+		  
+		  docker run -d -p 7001:7001 -p 9002:9002  --name weblogic \
+      -v $PWD:/u01/oracle/user_projects/domains/base_domain/domain.properties container-registry.oracle.com/middleware/weblogic:12.2.1.3
+	  
+	  
+	  docker run -d --name weblogic \
+  -p 7001:7001 \
+  -e ADMIN_USERNAME=weblogic \
+  -e ADMIN_PASSWORD=welcome1 \
+  container-registry.oracle.com/middleware/weblogic:12.2.1.3
+		  
+我们想说的是：一个伟大时代终将落幕，我们除了沉溺于闭幕的终曲中，对于其他无能为力。		  
+https://hub.docker.com/repositories/docker213
+docker密码
+密码 1qaz2WSX213
+
+mysql登录
+kubectl exec -it mysql-999dcb98f-srxff -- mysql -u root -p
+
+
+mysql开放远程连接：
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' IDENTIFIED BY 'root' WITH GRANT OPTION;
+flush privileges;        #刷新权限表，使配置生效
+开启防火墙端口
+systemctl start firewalld.service
+firewall-cmd --zone=public --add-port=6443/tcp --permanent
+firewall-cmd --zone=public --add-port=30001/tcp --permanent
+firewall-cmd --reload
+firewall-cmd --zone=public --list-ports
+systemctl stop firewalld.service
+systemctl disable firewalld.service
+要开放6443端口（k8s集群连接地址）和30001端口（k8s集群mysql端口）
+
+
+mysql8中已经不支持grant all privileges on *.* to 'root'@'%' identified by '密码' with grant option这种写法。
+
+通过下面三个步骤解决问题：
+
+步骤一：
+CREATE USER   IDENTIFIED by '*';
+步骤二： 
+grant all privileges on *.* to 'root'@'%' ;
+步骤三：
+FLUSH PRIVILEGES;
+
+
+问题1：error getting ClusterInformation: connection is unauthorized: Unauthorized
+
+重启 Calico Pods：最常见的快速解决方法是全面重启 Calico DaemonSet。这将强制刷新身份验证令牌。
+
+kubectl rollout restart daemonset calico-node -n kube-system

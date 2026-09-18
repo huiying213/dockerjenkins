@@ -1,0 +1,53 @@
+
+
+问题 ：The connection to the server 192.168.162.128:6443 was refused - did you specify the right host or port?
+
+
+1.集群执行
+kubeadm reset --cri-socket /var/run/cri-dockerd.sock
+
+2.管理节点
+kubeadm init --image-repository registry.aliyuncs.com/google_containers --kubernetes-version=v1.25.0 --pod-network-cidr=10.244.0.0/16 --cri-socket /var/run/cri-dockerd.sock
+
+#普通用户需要执行以下命令
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+#root 用户执行
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+
+
+3.从节点执行
+
+mv /etc/containerd/config.toml /etc/containerd/config.toml.bak
+systemctl restart containerd
+
+
+#需要加--cri-socket unix:///var/run/cri-dockerd.sock
+kubeadm join 192.168.162.128:6443 --token 0vvp2k.p4qtkbk106eh7pfw \
+        --discovery-token-ca-cert-hash sha256:21b5917685da148844b5de6ed710d8ba29ec3bc2c57710ed65018bba09f2311c --cri-socket unix:///var/run/cri-dockerd.sock
+ #为了让node节点也能执行kubectl命令
+echo "export KUBECONFIG=/etc/kubernetes/kubelet.conf" >> /etc/profile
+source /etc/profile
+
+4.安装 calico 网络插件
+#三台机器 执行
+wget https://docs.projectcalico.org/manifests/calico.yaml --no-check-certificate
+vim calico.yaml
+
+yaml 代码解读复制代码# no effect. This should fall within `--cluster-cidr`.
+ - name: CALICO_IPV4POOL_CIDR
+   value: "10.244.0.0/16"
+ # Disable file logging so `kubectl logs` works.
+
+bash 代码解读复制代码##192.168.162.128(master) 执行
+#下载镜像
+cat calico.yaml |grep image
+docker pull docker.io/calico/cni:v3.24.5
+docker pull docker.io/calico/node:v3.24.5
+docker pull docker.io/calico/kube-controllers:v3.24.5
+
+csharp 代码解读复制代码##192.168.52.131(master) 执行
+kubectl apply -f calico.yaml
+kubectl get pod -n kube-system
